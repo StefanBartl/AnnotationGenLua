@@ -6,35 +6,42 @@
 
 package types
 
-// Field represents a single field in a Lua module (e.g. M.foo = …)
+// Param represents a single parameter of a function field
+type Param struct {
+	Name string // parameter name
+	Type string // parameter type
+}
+
+// Field represents a field in M.*
 type Field struct {
-	Name        string // e.g. "rate_limits"
-	Type        string // e.g. "RateLimits"
-	Line        int    // line number in source file
-	HasDoc      bool   // whether this field has a comment annotation
-	Comment     string // extracted docstring if available
-	IsFunction  bool   // true if it's a function, false if a value/table
+	Name       string
+	Type       string
+	Line       int
+	HasDoc     bool
+	IsFunction bool
+	Params     []Param  // ← NEU
+	ReturnType string   // ← NEU
 }
 
-// ClassInfo represents a full @class block with associated fields
+// ClassInfo represents a @class block
 type ClassInfo struct {
-	ClassName  string  // e.g. "ReposcopeMetrics"
-	Extends    string  // optional: parent class
-	Fields     []Field // list of fields in the class
+	ClassName string
+	Extends   string
+	Fields    []Field
 }
 
-// ModuleHeader holds top-of-file annotations like @module, @brief, @desc
+// ModuleHeader holds file-level annotations
 type ModuleHeader struct {
-	ModulePath string // e.g. "mygrep.types.aliases"
+	ModulePath string
 	Brief      string
 	Desc       string
-	Class      *ClassInfo // optional: attached class
+	Class      *ClassInfo
 }
 
-// FileAnnotations bundles everything found/generated in a file
+// FileAnnotations represents all extracted annotations from a file
 type FileAnnotations struct {
-	Path     string       // file path
-	Header   ModuleHeader // header info
-	Existing []string     // lines of current file before modification
-	Updated  []string     // output with new annotations
+	Path     string
+	Header   ModuleHeader
+	Existing []string
+	Updated  []string
 }

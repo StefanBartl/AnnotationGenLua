@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,43 +12,54 @@ import (
 )
 
 var (
-	assignPattern   = regexp.MustCompile(`^M\.(\w+)\s*=\s*`)
-	funcPattern     = regexp.MustCompile(`^function\s+M\.(\w+)\s*\(`)
-	classPattern    = regexp.MustCompile(`^---@class\s+([^\s:]+)(?:\s*:\s*([^\s]+))?`)
+	assignPattern   = regexp.MustCompile(`^M\.(\w+)\s*=\s*(\{)?`)
+	funcPattern     = regexp.MustCompile(`^function\s+M\.(\w+)\s*\(([^)]*)\)`)
+	classPattern    = regexp.MustCompile(`^---@class\s+([^\s:]+)`)
 	modulePattern   = regexp.MustCompile(`^---@module\s+['"](.+)['"]`)
 	briefPattern    = regexp.MustCompile(`^---@brief\s*(.*)`)
 	descPattern     = regexp.MustCompile(`^---@desc\s*(.*)`)
-	fieldPattern    = regexp.MustCompile(`^---@field\s+(\w+)\s+([\w\[\]\|]+)`)
+	paramPattern    = regexp.MustCompile(`^---@param\s+(\w+)\s+(\w+)`)
+	returnPattern   = regexp.MustCompile(`^---@return\s+(.+)`)
 	localMPattern   = regexp.MustCompile(`^local\s+M\s*=\s*\{\s*\}`)
 )
 
-// PascalCase aus Dateinamen
-func extractClassNameFromPath(path string) string {
-	base := filepath.Base(path)
-	name := strings.TrimSuffix(base, ".lua")
-	parts := strings.Split(name, "_")
-	for i, part := range parts {
-		parts[i] = strings.Title(part)
+func camelize(name string) string {
+	base := strings.TrimSuffix(name, ".lua")
+	parts := strings.Split(base, "_")
+	for i := range parts {
+		parts[i] = strings.Title(parts[i])
 	}
 	return strings.Join(parts, "")
 }
 
-// Modulpfad z. B. reposcope.utils.metrics aus ./lua/reposcope/utils/metrics.lua
-func inferModulePath(path string) string {
-	parts := strings.Split(path, string(filepath.Separator))
+func inferModuleClassName(path string) string {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	project := "Project"
+	file := "Unknown"
+	for i, part := range parts {
+		if part == "lua" && i < len(parts)-1 {
+			if i+1 < len(parts) {
+				project = strings.Title(parts[i+1])
+			}
+			if i+2 < len(parts) {
+				file = camelize(parts[len(parts)-1])
+			}
+			break
+		}
+	}
+	return project + file
+}
 
+func inferModulePath(path string) string {
+	parts := strings.Split(filepath.ToSlash(path), "/")
 	for i := len(parts) - 1; i >= 0; i-- {
 		if parts[i] == "lua" && i < len(parts)-1 {
 			moduleParts := parts[i+1:]
-			moduleFile := strings.TrimSuffix(moduleParts[len(moduleParts)-1], ".lua")
-			moduleParts[len(moduleParts)-1] = moduleFile
+			moduleParts[len(moduleParts)-1] = strings.TrimSuffix(moduleParts[len(moduleParts)-1], ".lua")
 			return strings.Join(moduleParts, ".")
 		}
 	}
-
-	// Fallback: nur Dateiname
-	base := filepath.Base(path)
-	return strings.TrimSuffix(base, ".lua")
+	return strings.TrimSuffix(filepath.Base(path), ".lua")
 }
 
 func AnalyzeFile(path string) (*types.FileAnnotations, error) {
@@ -58,22 +70,26 @@ func AnalyzeFile(path string) (*types.FileAnnotations, error) {
 	defer file.Close()
 
 	var (
-		lines      []string
-		class      *types.ClassInfo
-		module     string
-		brief      string
-		desc       string
-		fields     []types.Field
-		foundNames = map[string]bool{}
+		lines        []string
+		fields       []types.Field
+		foundNames   = map[string]bool{}
+		module       = ""
+		brief        = ""
+		desc         = ""
+		classNameMap = map[string]string{}
 	)
 
+	var class *types.ClassInfo
+	var prevClass string
+	var paramBuffer []types.Param
+	var returnBuffer string
+	var docComment string
+	var hasTaggedComment bool
+
 	scanner := bufio.NewScanner(file)
-	ln := 0
 	for scanner.Scan() {
 		line := scanner.Text()
 		lines = append(lines, line)
-		ln++
-
 		trim := strings.TrimSpace(line)
 
 		switch {
@@ -87,33 +103,98 @@ func AnalyzeFile(path string) (*types.FileAnnotations, error) {
 			desc = descPattern.FindStringSubmatch(trim)[1]
 
 		case classPattern.MatchString(trim):
-			matches := classPattern.FindStringSubmatch(trim)
-			class = &types.ClassInfo{
-				ClassName: matches[1],
-				Extends:   matches[2],
-			}
+			prevClass = classPattern.FindStringSubmatch(trim)[1]
 
-		case fieldPattern.MatchString(trim) && class != nil:
-			matches := fieldPattern.FindStringSubmatch(trim)
-			field := types.Field{
-				Name:   matches[1],
-				Type:   matches[2],
-				HasDoc: true,
-			}
-			fields = append(fields, field)
-			foundNames[field.Name] = true
-		}
-	}
+		case paramPattern.MatchString(trim):
+			m := paramPattern.FindStringSubmatch(trim)
+			paramBuffer = append(paramBuffer, types.Param{Name: m[1], Type: m[2]})
+			hasTaggedComment = true
 
-	if class == nil {
-		for _, line := range lines {
-			if localMPattern.MatchString(line) {
-				name := extractClassNameFromPath(path)
-				class = &types.ClassInfo{
-					ClassName: name,
-					Extends:   name + "Def",
+		case returnPattern.MatchString(trim):
+			r := strings.TrimSpace(returnPattern.FindStringSubmatch(trim)[1])
+			hasTaggedComment = true
+			// extract type only, ignoring description
+			if strings.HasPrefix(r, "{") && strings.Contains(r, "}") {
+				i := strings.Index(r, "}") + 1
+				if i > 0 && i <= len(r) {
+					r = r[:i]
 				}
-				break
+			} else if i := strings.Index(r, " "); i > 0 {
+				r = r[:i]
+			}
+			returnBuffer = r
+
+		case strings.HasPrefix(trim, "---") && !strings.HasPrefix(trim, "---@"):
+			if docComment == "" && !hasTaggedComment {
+				docComment = strings.TrimSpace(strings.TrimPrefix(trim, "---"))
+			}
+
+		case funcPattern.MatchString(trim):
+			m := funcPattern.FindStringSubmatch(trim)
+			name := m[1]
+			paramList := strings.TrimSpace(m[2])
+			if foundNames[name] {
+				continue
+			}
+
+			var params []types.Param
+			if len(paramBuffer) == 0 && paramList != "" {
+				rawNames := strings.Split(paramList, ",")
+				for _, r := range rawNames {
+					n := strings.TrimSpace(r)
+					if n != "" {
+						params = append(params, types.Param{Name: n, Type: "any"})
+					}
+				}
+			} else {
+				params = paramBuffer
+			}
+
+			field := types.Field{
+				Name:       name,
+				IsFunction: true,
+				Params:     params,
+				ReturnType: returnBuffer,
+			}
+
+			var paramSig []string
+			for _, p := range params {
+				paramSig = append(paramSig, fmt.Sprintf("%s: %s", p.Name, p.Type))
+			}
+
+			ret := returnBuffer
+			if ret == "" {
+				ret = "any"
+			}
+
+			field.Type = fmt.Sprintf("fun(%s): %s", strings.Join(paramSig, ", "), ret)
+			if docComment != "" {
+				field.Type += " " + strings.TrimSpace(docComment)
+			}
+
+			fields = append(fields, field)
+			foundNames[name] = true
+
+			paramBuffer = nil
+			returnBuffer = ""
+			docComment = ""
+			hasTaggedComment = false
+
+		case assignPattern.MatchString(trim):
+			m := assignPattern.FindStringSubmatch(trim)
+			name := m[1]
+			isTable := m[2] == "{"
+			if prevClass != "" && isTable {
+				classNameMap[name] = prevClass
+			}
+			prevClass = ""
+
+		default:
+			if !strings.HasPrefix(trim, "--") {
+				paramBuffer = nil
+				returnBuffer = ""
+				docComment = ""
+				hasTaggedComment = false
 			}
 		}
 	}
@@ -124,35 +205,28 @@ func AnalyzeFile(path string) (*types.FileAnnotations, error) {
 			if foundNames[name] {
 				continue
 			}
+
+			fieldType := "any"
+			if cls, ok := classNameMap[name]; ok {
+				fieldType = cls
+			}
+
 			field := types.Field{
 				Name:       name,
-				Type:       "",
+				Type:       fieldType,
 				Line:       idx + 1,
-				HasDoc:     false,
-				IsFunction: strings.Contains(line, "function("),
-			}
-			fields = append(fields, field)
-			foundNames[name] = true
-		}
-		if matches := funcPattern.FindStringSubmatch(line); matches != nil {
-			name := matches[1]
-			if foundNames[name] {
-				continue
-			}
-			field := types.Field{
-				Name:       name,
-				Type:       "fun(...)",
-				Line:       idx + 1,
-				HasDoc:     false,
-				IsFunction: true,
+				IsFunction: false,
 			}
 			fields = append(fields, field)
 			foundNames[name] = true
 		}
 	}
 
-	if class != nil {
-		class.Fields = fields
+	className := inferModuleClassName(path)
+	class = &types.ClassInfo{
+		ClassName: className,
+		Extends:   className + "Def",
+		Fields:    fields,
 	}
 
 	if module == "" {

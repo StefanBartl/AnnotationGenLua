@@ -30,12 +30,20 @@ func RenderSplitClassAnnotations(class *types.ClassInfo) ([]string, string) {
 				fieldType = "any"
 			}
 		}
+		// first line @field
 		defLines = append(defLines, fmt.Sprintf("---@field %s %s", field.Name, fieldType))
+
+		// overloads intendet
+		for _, ov := range field.Overloads {
+			defLines = append(defLines, "   " + ov)
+	}
+
 	}
 
 	instLine := fmt.Sprintf("---@class %s : %s", class.ClassName, defName)
 	return defLines, instLine
 }
+
 
 // Builds the complete top annotation block for merging into the original file
 func BuildHeaderBlock(fa *types.FileAnnotations) []string {

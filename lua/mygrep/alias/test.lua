@@ -40,6 +40,8 @@ M.rate_limits = {
 
 --- Retrieves the current session request counts
 ---@return { successful: number, failed: number, cache_hitted: number, fcache_hitted: number }
+---@overload fun(str: string): number
+---@overload fun(str: string, base: number): number
 function M.get_session_requests()
   return {
     successful = M.req_count.successful,

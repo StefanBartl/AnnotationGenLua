@@ -3,6 +3,8 @@
 ---@desc LEER
 ---@class MygrepTestDef
 ---@field get_session_requests fun(): { successful: number, failed: number, cache_hitted: number, fcache_hitted: number } Retrieves the current session request counts
+---@overload fun(str: string)
+---@overload fun(str: string, base: number)
 ---@field get_total_requests fun(): { successful: number, failed: number, cache_hitted: number, fcache_hitted: number } Retrieves the total request counts from the file
 ---@field increase_success fun(uuid: any, query: any, source: any, context: any, duration_ms: any, status_code: any): any Increases the successful request count
 ---@field increase_failed fun(uuid: any, query: any, source: any, context: any, duration_ms: any, status_code: any, error: any): any Increases the failed request count

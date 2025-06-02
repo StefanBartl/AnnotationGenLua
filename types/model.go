@@ -16,11 +16,11 @@ type Param struct {
 type Field struct {
 	Name       string
 	Type       string
-	Line       int
-	HasDoc     bool
 	IsFunction bool
-	Params     []Param  // ← NEU
-	ReturnType string   // ← NEU
+	Params     []Param
+	ReturnType string
+	Overloads  []string
+	Line       int
 }
 
 // ClassInfo represents a @class block
@@ -42,6 +42,8 @@ type ModuleHeader struct {
 type FileAnnotations struct {
 	Path     string
 	Header   ModuleHeader
+	Fields []Field
+	Globals map[string]bool
 	Existing []string
 	Updated  []string
 }

@@ -1,0 +1,25 @@
+---@module 'mygrep.alias.test'
+---@brief LEER
+---@desc LEER
+---@class RateLimitDetails
+---@field successful number
+---@field failed number
+---@field cache_hitted number
+---@field fcache_hitted number
+---@field core RateLimitDetails
+---@field search RateLimitDetails
+---@field limit number
+---@field remaining number
+---@field reset number
+---@field req_count any
+---@field rate_limits any
+---@field get_session_requests fun(...)
+---@field get_total_requests fun(...)
+---@field increase_success fun(...)
+---@field increase_failed fun(...)
+---@field increase_cache_hit fun(...)
+---@field increase_fcache_hit fun(...)
+---@field check_rate_limit fun(...)
+---@field record_metrics fun(...)
+---@field toggle_record_metrics fun(...)
+---@field set_record_metrics fun(...)
